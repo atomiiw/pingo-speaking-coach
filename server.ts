@@ -193,49 +193,46 @@ Stem types to draw from (pick 4 total, 2 experience + 2 observation):
   - "What it does better than [competitor/alternative] is [your observation]."
   - "The reason someone would keep using this is [why it sticks]."
 
-These are TEMPLATES. Adapt them to the specific company and product the user mentioned. The stem should feel like it was written FOR this company, not copy-pasted.
+Use EXACTLY these 4 stems every time, only replacing [product] with the product name the user mentioned. Do NOT rephrase, do NOT add words, do NOT invent new stems. Copy them verbatim:
 
-In experience stems, always use the PRODUCT NAME, never a specific feature. You don't know which feature the user tried first. Let them decide. Good: "When I used Pingo I ___". Bad: "When I tried Pingo's conversation mode I ___".
+  1. "When I tried [product] I [what happened]."
+  2. "What surprised me was [what you noticed]."
+  3. "The people who would love this most are [who and why]."
+  4. "What I think it can improve on is [your idea]."
 
-The last stem must ALWAYS be about improvement. "What I think it can improve on is ___" or similar. This is the anchor. The other three stems lead up to it.
+In stem 1, use the PRODUCT NAME the user said, nothing else. If the user said "Pingo" write "Pingo". If STT transcribed it differently (e.g. "Pingal"), use the closest real product name from context.
 
-Shape rules:
-- Each stem is a COMPLETE sentence the user can speak aloud, finishing at the blank.
-- Exactly ONE \`[bracket placeholder]\` per stem, at the end.
-- Placeholder is 2 to 5 words, lowercase, names what to fill in.
-- 8 to 16 words per stem. Spoken English. Plain.
-- Stems must pass the REAL-CONVERSATION TEST: would you actually start a sentence this way talking to a friend?
-- No cleft sentences. No memoir aftermath ("After...", "Since...", "That's when...").
-- No fillers ("really", "honestly", "actually", "the thing is").
-- Ban "thing", "stuff", "aspect" in the stem.
-- No em-dashes. No colons inside a sentence. Contractions welcome.
-- Make NO assumptions about the user's life. Never invent projects, tools, skills, or history they haven't mentioned.
+Do NOT:
+- Rephrase stems ("The first thing I noticed was..." instead of "When I tried X I...")
+- Add comparisons ("Compared to Duolingo..." is NOT a stem)
+- Add feature names ("When I tried Pingo's conversation mode...")
+- Invent new stems not in the list above
 
-Worked example 1. User said: "I'm pitching to Flow Studios, they make AI movies, founders came from Instagram Stories. I do video edits on the side."
+Worked example 1. User said: "I'm pitching to Flow Studios, they make AI movies."
   ask: "Tell me what happened."
   hints: [
-    "I tried Flow Studios and the first thing I noticed was [what you noticed].",
-    "The part that felt different from normal video editing was [what surprised you].",
+    "When I tried Flow Studios I [what happened].",
+    "What surprised me was [what you noticed].",
     "The people who would love this most are [who and why].",
-    "The one thing I'd improve is [your idea]."
+    "What I think it can improve on is [your idea]."
   ]
 
-Worked example 2. User said: "It's Pingo, an AI language app. It does conversation practice but teaches advanced speakers like beginners."
+Worked example 2. User said: "It's Pingo, an AI language app."
   ask: "Tell me what happened."
   hints: [
     "When I tried Pingo I [what happened].",
-    "The part that felt off was when it [what broke for you].",
+    "What surprised me was [what you noticed].",
     "The people who would love this most are [who and why].",
-    "The one thing I'd improve is [your idea]."
+    "What I think it can improve on is [your idea]."
   ]
 
-Worked example 3. User said: "A friend is building an open-source agent runtime. I want to join their team."
-  ask: "Tell me what happened."
+Worked example 3. User said: "A friend is building an agent runtime."
+  ask: "Walk me through it."
   hints: [
-    "I tried the runtime and [what happened].",
-    "The part that felt off was when it [what broke].",
-    "The reason someone would keep using this is [why it sticks].",
-    "The one thing I'd improve is [your idea]."
+    "When I tried the runtime I [what happened].",
+    "What surprised me was [what you noticed].",
+    "The people who would love this most are [who and why].",
+    "What I think it can improve on is [your idea]."
   ]
 
 Spoken ask should be short, warm, and tell the user what to do THIS round specifically. Each round sounds different because each round IS different.
