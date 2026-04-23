@@ -277,10 +277,17 @@ export default function App() {
   const showHints = !ask && hints.length > 0;
   const hasMiddle = showHints || !!pass || !!revision;
 
+  // When middle content exists and user isn't recording, shrink TOP to give MIDDLE more room.
+  // When recording or no middle content, TOP expands to fill.
+  const topGrows = recording || !hasMiddle;
+  const gridRows = topGrows
+    ? "grid-rows-[1fr_auto_auto]"       // TOP fills: recording or idle
+    : "grid-rows-[auto_1fr_auto]";      // MIDDLE fills: hints/cloze/revision showing
+
   return (
-    <div className="h-screen grid grid-rows-[1fr_auto_auto] relative">
+    <div className={`h-screen grid ${gridRows} relative`}>
       {/* TOP — ephemeral content: transcript | subtitle | first-turn hint */}
-      <section className="min-h-0 overflow-hidden px-8 md:px-12 pb-2 md:pb-3 pt-4 md:pt-5">
+      <section className={`min-h-0 overflow-hidden px-8 md:px-12 pb-2 md:pb-3 pt-4 md:pt-5 ${topGrows ? "" : "max-h-[30vh]"}`}>
         {showHoldHint ? (
           <HoldHint />
         ) : (
@@ -312,9 +319,8 @@ export default function App() {
         )}
       </section>
 
-      {/* MIDDLE — persistent: hints (fill-in-the-blank) + pass panel.
-          Capped at 60vh so hints dominate the screen once Pingo stops talking. */}
-      <section className="min-h-0 overflow-hidden max-h-[60vh] px-8 md:px-12 pt-2 md:pt-3 pb-2 md:pb-3">
+      {/* MIDDLE — persistent: hints / cloze / revision / pass panel */}
+      <section className="min-h-0 overflow-hidden px-8 md:px-12 pt-2 md:pt-3 pb-2 md:pb-3">
         {hasMiddle && (
           <ScrollArea
             anchor="top"
