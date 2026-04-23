@@ -14,23 +14,25 @@ Four rounds. Each round you speak, and the agent strips away one more layer of s
 
 The agent gives you four fill-in-the-blank stems. You say everything messy in one take.
 
-![Orient](demos/demo-step0-orient.png)
+![Round 0 — Orient](demos/round-0-orient.png)
 
 ### Round 1: Say it with structure
 
 The agent rewrites your dump into 3–5 polished sentence stems, each with one blank at a key content slot. Same bullet shape as Round 0 — but now each stem is tuned to the ideas you actually expressed. You fill the blanks in out loud. The structure teaches you better phrasing without giving you the words.
 
-![Cloze](demos/demo-step1-cloze.png)
+![Round 1 — Cloze](demos/round-1-cloze.png)
 
 ### Round 2: Read the polished version
 
 The agent rewrites your speech one more time as a complete paragraph. A word-level diff highlights exactly what changed: coral strikethrough for removed words, green for replacements. You read the final version clean.
 
-![Revision](demos/demo-step2-revision.png)
+![Round 2 — Revision](demos/round-2-revision.png)
 
 ### Round 3: Deliver from memory
 
 The agent gives you a handful of short memory cues — 2–5 word key phrases, no full sentences. You look at them, internalize the arc, and deliver the pitch out loud without reading. This is the round that simulates actually saying it to the CEO.
+
+![Round 3 — Deliver](demos/round-3-done.png)
 
 ## The Insight
 
