@@ -159,7 +159,7 @@ TURN TYPE: orient (user just gave you context about their pitch target)
 ─────────────────────────────
 The user just said something about the company, product, person, or opportunity they're pitching to. Their exact words are given in \`utterance\`.
 
-Your job: produce THREE fill-in-the-blank sentence frames that push the user to COMPOSE the essential beats of a pitch out loud. Call \`emit_orient({ ask, hints })\` exactly once.
+Your job: produce FOUR fill-in-the-blank sentence frames that push the user to COMPOSE the essential beats of a pitch out loud. Call \`emit_orient({ ask, hints })\` exactly once.
 
 This is language-practice, not a podcast interview. Fill-in-the-blank frames force the user to compose a specific sentence. Open questions let them dodge with "I don't know, it just felt off." Always use frames.
 
@@ -209,7 +209,7 @@ Do NOT:
 - Invent new stems not in the list above
 
 Worked example 1. User said: "I'm pitching to Flow Studios, they make AI movies."
-  ask: "Tell me what happened."
+  ask: "Tell me how it felt using it."
   hints: [
     "When I tried Flow Studios I [what happened].",
     "What surprised me was [what you noticed].",
@@ -218,7 +218,7 @@ Worked example 1. User said: "I'm pitching to Flow Studios, they make AI movies.
   ]
 
 Worked example 2. User said: "It's Pingo, an AI language app."
-  ask: "Tell me what happened."
+  ask: "Tell me how it felt using it."
   hints: [
     "When I tried Pingo I [what happened].",
     "What surprised me was [what you noticed].",
@@ -227,7 +227,7 @@ Worked example 2. User said: "It's Pingo, an AI language app."
   ]
 
 Worked example 3. User said: "A friend is building an agent runtime."
-  ask: "Walk me through it."
+  ask: "Walk me through your experience."
   hints: [
     "When I tried the runtime I [what happened].",
     "What surprised me was [what you noticed].",
@@ -236,7 +236,7 @@ Worked example 3. User said: "A friend is building an agent runtime."
   ]
 
 Spoken ask should be short, warm, and tell the user what to do THIS round specifically. Each round sounds different because each round IS different.
-Orient: you are asking them to tell you about their experience. E.g. "Tell me what happened.", "Walk me through it."
+Orient: you are asking them to describe their experience using the product. Reference the product. E.g. "Tell me how it felt using it.", "Walk me through your experience.", "How was it when you tried it?"
 Cloze: you are asking them to say the paragraph filling in the blanks. E.g. "Now try saying this.", "Try saying this."
 Revision: you are asking them to read the cleaned-up version. E.g. "Read this version back to me.", "Say this one clean."
 NEVER: "Fill these in out loud.", "Complete these.", "Ok, your turn.", "Give it a shot.", "Chew on these.", "Dig in.", "Got it.", "Let's unpack.", "Here you go." Nothing generic. Every ask should be specific to what the user is about to do.
@@ -423,7 +423,7 @@ const tools = [
         hints: {
           type: "array",
           description:
-            "Exactly 3 tailored fill-in-the-blank hints. Each is one line under 15 words with one [bracketed placeholder]. Each must reference a SPECIFIC detail from what the user said (product, positioning, founder, domain, competitor, user's own background).",
+            "Exactly 4 fill-in-the-blank hints. Use the 4 fixed templates from the system prompt, only replacing [product] with the product name.",
           items: { type: "string" },
         },
       },
@@ -745,7 +745,7 @@ async function runOrientTurn(
 The user just told you about the company/target they want to pitch to. Their words:
 "${utterance}"
 
-Call \`emit_orient({ ask, hints })\` exactly once. Generate 3 TAILORED hints that reference specific details from what they said. Make the user think. No generic templates.`;
+Call \`emit_orient({ ask, hints })\` exactly once. Generate exactly 4 hints using the fixed templates from the system prompt. Only replace [product] with the product name.`;
 
   const resp = await anthropic.messages.create({
     model: MODEL,
@@ -766,7 +766,7 @@ Call \`emit_orient({ ask, hints })\` exactly once. Generate 3 TAILORED hints tha
     hints = rawHints
       .map((h: unknown) => String(h ?? "").trim())
       .filter((h: string) => h.length > 0)
-      .slice(0, 3);
+      .slice(0, 4);
     break;
   }
 
