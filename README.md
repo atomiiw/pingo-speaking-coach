@@ -8,7 +8,7 @@ Language apps teach beginners vocabulary. But advanced speakers already know the
 
 ## How It Works
 
-Three rounds. Each round you speak, and the agent reshapes how you said it.
+Four rounds. Each round you speak, and the agent strips away one more layer of scaffolding until you are delivering from memory.
 
 ### Round 0: Dump your thoughts
 
@@ -18,27 +18,40 @@ The agent gives you four fill-in-the-blank stems. You say everything messy in on
 
 ### Round 1: Say it with structure
 
-The agent rewrites your dump into a polished paragraph with blanks where your key content goes. You fill them in out loud. The structure teaches you better phrasing without giving you the words.
+The agent rewrites your dump into 3–5 polished sentence stems, each with one blank at a key content slot. Same bullet shape as Round 0 — but now each stem is tuned to the ideas you actually expressed. You fill the blanks in out loud. The structure teaches you better phrasing without giving you the words.
 
 ![Cloze](demos/demo-step1-cloze.png)
 
 ### Round 2: Read the polished version
 
-The agent rewrites your speech one more time. A word-level diff highlights exactly what changed: grey strikethrough for removed words, green for replacements. You read the final version clean.
+The agent rewrites your speech one more time as a complete paragraph. A word-level diff highlights exactly what changed: coral strikethrough for removed words, green for replacements. You read the final version clean.
 
 ![Revision](demos/demo-step2-revision.png)
 
+### Round 3: Deliver from memory
+
+The agent gives you a handful of short memory cues — 2–5 word key phrases, no full sentences. You look at them, internalize the arc, and deliver the pitch out loud without reading. This is the round that simulates actually saying it to the CEO.
+
 ## The Insight
 
-Advanced speakers do not need to be told the right answer. They need to practice composing it. Each round gives less scaffolding: stems, then structure with blanks, then inline edits. By the third round you are reading your own words, cleaned up, and the diff shows you exactly where your language was loose.
+Advanced speakers do not need to be told the right answer. They need to practice composing it. Each round strips one layer of scaffolding:
+
+| Round | Scaffolding | What the user does |
+| --- | --- | --- |
+| 0 — Orient | 4 generic stems | Dump everything |
+| 1 — Cloze | Tuned stems with blanks | Say it with structure |
+| 2 — Revision | Full sentences, edits highlighted | Read the polish |
+| 3 — Memory | Key phrases only | Deliver from memory |
+
+By Round 3 you are speaking your own words, cleaned up and internalized, with just enough cues to hit every beat.
 
 ## Technical Challenges
 
 **Real-time response (<500ms).** Deepgram STT streams interim transcripts over WebSocket as the user speaks. On release, the final transcript goes to Claude in one tool-use call. TTS streams back chunk-by-chunk so audio starts before synthesis finishes. Total silence gap from button release to first audio byte: ~400ms.
 
-**Voice and conversation orchestration.** One Bun WebSocket server manages three async streams per session: mic PCM in, Deepgram STT out, Claude agent turn, Deepgram TTS out. Each round is a single push-to-talk cycle with no polling and no idle connections. State machine has three phases (orient, cloze, revision), each wired to a different tool schema so the agent cannot drift.
+**Voice and conversation orchestration.** One Bun WebSocket server manages four async streams per session: mic PCM in, Deepgram STT out, Claude agent turn, Deepgram TTS out. Each round is a single push-to-talk cycle with no polling and no idle connections. State machine has six UI stages (idle, brief, orient, cloze, revision, done), and the iterate phase force-dispatches a different tool schema per round (`emit_pass` for cloze, `emit_revision` for round 2, `emit_pass` with `done:true` for the memory round) so the agent cannot drift. Every Pingo spoken moment routes through a single `pingoTurn` primitive — one function, one place to reason about.
 
-**Making AI responses feel natural.** The agent never writes filler or chatbot phrases. The system prompt bans 30+ words ("genuinely", "leverage", "let's unpack") and enforces a teacher voice. Round 2 uses a word-level LCS diff between the user's speech and the agent's rewrite, so edits are precise to the word and the unchanged parts stay exactly as the user said them.
+**Making AI responses feel natural.** The agent never writes filler or chatbot phrases. The system prompt bans 30+ words ("genuinely", "leverage", "let's unpack") and enforces a teacher voice. Cloze stems pass a two-way grammar test: the sentence must read naturally both with the bracket label pronounced literally AND with a plausible user answer swapped in — no orphan tails, no mid-clause blanks. Round 2 uses a word-level LCS diff between the user's speech and the agent's rewrite, so edits are precise to the word and the unchanged parts stay exactly as the user said them.
 
 ## Stack
 
