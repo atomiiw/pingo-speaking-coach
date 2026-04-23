@@ -6,7 +6,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { Keep, Pass, DiffSegment, ServerMsg } from "../shared/types";
+import type { Keep, Pass, DiffSegment, ServerMsg, Stage } from "../shared/types";
 
 const circled = (label: string) => {
   const code = label.toUpperCase().charCodeAt(0);
@@ -16,10 +16,14 @@ const circled = (label: string) => {
 
 export default function App() {
   const [ready, setReady] = useState(false);
+  // ★ THE single source of truth for which phase the user is in. Server
+  // explicitly sends `stage` messages at every transition. Every phase-scoped
+  // state (ask/hints/pass/revision) is kept in sync around this.
+  const [stage, setStage] = useState<Stage>("idle");
   const [ask, setAsk] = useState<string | null>(null);
   const [pass, setPass] = useState<Pass | null>(null);
   const [hints, setHints] = useState<string[]>([]);
-  const [revision, setRevision] = useState<DiffSegment[] | null>(null);
+  const [revision, setRevision] = useState<{ segments: DiffSegment[]; original: string } | null>(null);
   const [interim, setInterim] = useState("");
   const [recording, setRecording] = useState(false);
   const [speaking, setSpeaking] = useState(false);
@@ -33,6 +37,11 @@ export default function App() {
   useEffect(() => {
     hintsRef.current = hints;
   }, [hints]);
+  // Same treatment for revision so onEnd can tell when to clear the ask.
+  const revisionRef = useRef<{ segments: DiffSegment[]; original: string } | null>(null);
+  useEffect(() => {
+    revisionRef.current = revision;
+  }, [revision]);
   const audioRef = useRef<{
     ctx: AudioContext;
     node: AudioWorkletNode;
@@ -70,6 +79,13 @@ export default function App() {
           break;
         case "phase":
           break;
+        case "stage":
+          // Entering a new phase — wipe any lingering user-speech state so
+          // transcription starts EMPTY for each phase's "you speak" moment.
+          setStage(msg.stage);
+          setInterim("");
+          setAwaiting(false);
+          break;
         case "ask":
           // Hold onto the user's transcription + Thinking dots until TTS
           // actually starts playing — don't clear interim/awaiting here.
@@ -85,7 +101,7 @@ export default function App() {
           setAwaiting(false);
           break;
         case "revision":
-          setRevision(msg.segments);
+          setRevision({ segments: msg.segments, original: msg.original });
           setInterim("");
           setAwaiting(false);
           break;
@@ -108,7 +124,10 @@ export default function App() {
               }
             },
             () => {
-              if (hintsRef.current.length > 0) {
+              // Clear the ask when there's a follow-up view to reveal
+              // (hints, or a revision diff). Otherwise keep the subtitle
+              // up until the user taps.
+              if (hintsRef.current.length > 0 || revisionRef.current) {
                 setAsk(null);
               }
             },
@@ -160,7 +179,11 @@ export default function App() {
     setInterim("");
     setAsk(null);
     setAwaiting(false);
-    setRevision(null);
+    // Deliberately DON'T clear `revision` here — during the read-back phase
+    // the user is reading FROM the cleaned-up version, so it must stay
+    // visible in MIDDLE while they record. It'll get replaced when the
+    // server sends a new revision or cleared explicitly when the session
+    // moves past that phase.
     if (ttsAudioRef.current) {
       try { ttsAudioRef.current.pause(); } catch {}
     }
@@ -254,22 +277,39 @@ export default function App() {
   const showHoldHint =
     firstTurn && !recording && !speaking && !awaiting;
 
-  // Hints only reveal once Pingo has finished speaking (ask cleared).
-  // Plan always shows when present.
+  // MIDDLE rendering is now dispatched strictly by `stage`. Each stage owns
+  // what shows below the button. `ask` is still allowed to suppress MIDDLE
+  // while Pingo is actively speaking so the subtitle holds the screen.
+  //
+  //   stage       MIDDLE content
+  //   ─────       ──────────────
+  //   idle        (nothing)
+  //   brief       (nothing — waiting for user to describe their target)
+  //   orient      <Hints> — 4 fill-in-the-blank stems
+  //   cloze       <Hints> — polished paragraph with blanks
+  //   revision    <RevisionView> — clean diff to read back
+  //   done        <DonePanel> — "deliver it clean." + memory hints below
   const showHints = !ask && hints.length > 0;
-  const hasMiddle = showHints || !!pass || !!revision;
+  const hasMiddle =
+    stage === "orient" ||
+    stage === "cloze" ||
+    stage === "revision" ||
+    stage === "done";
 
-  // When middle content exists and user isn't recording, shrink TOP to give MIDDLE more room.
-  // When recording or no middle content, TOP expands to fill.
-  const topGrows = recording || !hasMiddle;
-  const gridRows = topGrows
-    ? "grid-rows-[1fr_auto_auto]"       // TOP fills: recording or idle
-    : "grid-rows-[auto_1fr_auto]";      // MIDDLE fills: hints/cloze/revision showing
+  // Layout:
+  //   - hasMiddle  → 50/50 split between TOP (Atom speech) and MIDDLE (hints).
+  //     Neither side can starve the other. Overflow in either zone scrolls
+  //     inside its own ScrollArea.
+  //   - no MIDDLE  → TOP fills (idle / brief / pingo speaking alone).
+  const gridRows = hasMiddle
+    ? "grid-rows-[1fr_1fr_auto]"        // 50/50
+    : "grid-rows-[1fr_auto_auto]";      // TOP fills when alone
+  const topGrows = !hasMiddle;
 
   return (
     <div className={`h-screen grid ${gridRows} relative`}>
       {/* TOP — ephemeral content: transcript | subtitle | first-turn hint */}
-      <section className={`min-h-0 overflow-hidden px-8 md:px-12 ${topGrows ? "pt-4 md:pt-5 pb-2 md:pb-3" : "pt-3 md:pt-4 pb-1 md:pb-1"}`}>
+      <section className={`min-h-0 overflow-hidden px-8 md:px-12 ${topGrows ? "pt-4 md:pt-5 pb-0" : "pt-3 md:pt-4 pb-0"}`}>
         {showHoldHint ? (
           <HoldHint />
         ) : (
@@ -288,13 +328,17 @@ export default function App() {
           >
             <div className="w-full max-w-7xl mx-auto">
               {recording ? (
+                // Live transcription while user is speaking this phase.
                 <Subtitle speaker="you" text={interim} live />
-              ) : awaiting && interim ? (
-                // Keep the user's transcription visible while Pingo thinks.
-                // The "thinking" indicator lives in the talk button instead.
-                <Subtitle speaker="you" text={interim} />
               ) : ask ? (
+                // Pingo is speaking (or paused between TTS and user tap).
                 <Subtitle speaker="pingo" text={ask} />
+              ) : interim ? (
+                // User just finished (or is between awaiting and settle) —
+                // show their utterance. `interim` is cleared by the stage
+                // handler whenever a new phase begins, so this never ghosts
+                // text from a previous phase into the current one.
+                <Subtitle speaker="you" text={interim} />
               ) : null}
             </div>
           </ScrollArea>
@@ -302,22 +346,31 @@ export default function App() {
       </section>
 
       {/* MIDDLE — persistent: hints / cloze / revision / pass panel */}
-      <section className="min-h-0 overflow-hidden px-8 md:px-12 pt-2 md:pt-3 pb-2 md:pb-3">
-        {hasMiddle && (
+      <section className="min-h-0 overflow-hidden px-8 md:px-12 pt-0 pb-2 md:pb-3">
+        {hasMiddle && !ask && (
           <ScrollArea
             anchor="top"
-            scrollKey={`mid:${showHints ? hints.join("|") : ""}:${pass?.round ?? 0}:${pass?.done ? "d" : "p"}`}
+            scrollKey={`mid:${stage}:${hints.join("|")}:${pass?.round ?? 0}`}
             className="h-full"
           >
             <div className="w-full max-w-7xl mx-auto space-y-10 md:space-y-14">
-              {showHints && !revision && <Hints items={hints} />}
-              {revision && !showHints ? (
-                <RevisionView segments={revision} />
-              ) : pass?.done && !showHints ? (
-                <DonePanel />
-              ) : !showHints && pass ? (
-                <PassPanel pass={pass} />
-              ) : null}
+              {/* ── Stage: orient ── 4 fill-in-the-blank stems */}
+              {stage === "orient" && hints.length > 0 && <Hints items={hints} />}
+
+              {/* ── Stage: cloze ── polished paragraph with blanks */}
+              {stage === "cloze" && hints.length > 0 && <Hints items={hints} />}
+
+              {/* ── Stage: revision ── clean-up diff to read back */}
+              {stage === "revision" && revision && (
+                <RevisionView segments={revision.segments} />
+              )}
+
+              {/* ── Stage: done ── memory hints only.
+                 "Alright. Now deliver it clean." is Pingo's spoken intro —
+                 it shows as the Pingo subtitle in TOP during TTS. After TTS
+                 ends, TOP goes empty (or Atom's live transcription starts)
+                 and MIDDLE shows the memory hints, same shape as orient/cloze. */}
+              {stage === "done" && hints.length > 0 && <Hints items={hints} />}
             </div>
           </ScrollArea>
         )}
@@ -381,13 +434,13 @@ function ScrollArea({
   return (
     <div ref={ref} className={`scroll-fade overflow-y-auto ${className}`}>
       {/*
-        Symmetric py-8 (32px top + bottom) keeps content clear of the 24px
-        edge-fade mask on both sides. When content overflows, the padding
-        scrolls into the fade naturally, signalling "more beyond."
+        Tight inner py (8px) pairs with the smaller fade mask (8px in
+        index.css) so the gap between stacked ScrollAreas stays minimal
+        while content still clears the fade zone.
       */}
       <div
         className={[
-          "min-h-full flex flex-col py-8",
+          "min-h-full flex flex-col py-4",
           anchor === "bottom"
             ? "justify-end"
             : anchor === "center"
@@ -769,16 +822,6 @@ function PassPanel({ pass }: { pass: Pass }) {
   );
 }
 
-function DonePanel() {
-  return (
-    <p
-      key="done"
-      className="animate-fade-in text-[56px] md:text-[80px] leading-[0.95] font-sans font-black text-cream-900 tracking-[-0.035em]"
-    >
-      deliver it clean.
-    </p>
-  );
-}
 
 /* ── shared ──────────────────────────────────────────────────── */
 

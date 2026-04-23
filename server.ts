@@ -114,6 +114,41 @@ function sendCachedBriefTts(ws: ServerWebSocket<unknown>) {
   return false;
 }
 
+/**
+ * ★ THE canonical "Pingo speaks" primitive. ★
+ *
+ * Every moment Pingo opens its mouth — gate clarification, orient intro,
+ * cloze intro, revision intro, final-memory intro — goes through this ONE
+ * function. Do not duplicate the "send ask + call speak" pair elsewhere.
+ *
+ * Orchestrates end-to-end:
+ *   1. Sends the `ask` message so the client renders Pingo's subtitle at the
+ *      top of the screen.
+ *   2. Streams Deepgram TTS audio — or, if `useCache` is true and the cache
+ *      is warm, replays the pre-synthesized cached brief instead of paying
+ *      for a live synthesis.
+ *   3. Returns when all TTS bytes have been sent over the WS. Client-side
+ *      audio may still be draining its buffer — the client's onEnd callback
+ *      dismisses the subtitle automatically when follow-up content (hints /
+ *      revision) is staged.
+ *
+ * Convention: callers that also emit hints / pass / revision should send
+ * those messages BEFORE awaiting pingoTurn, so they're already in the
+ * client's state by the time TTS ends and the client can smoothly transition
+ * from Pingo's subtitle → hints/revision panel.
+ */
+async function pingoTurn(
+  ws: ServerWebSocket<unknown>,
+  text: string,
+  opts: { useCache?: boolean } = {},
+) {
+  const trimmed = text.trim();
+  if (!trimmed) return;
+  send(ws, { type: "ask", question: trimmed });
+  if (opts.useCache && sendCachedBriefTts(ws)) return;
+  await speak(ws, trimmed);
+}
+
 const ORIENT_PROMPT = "Alright. First, tell me what they do.";
 
 const SYSTEM_PROMPT = `You are Pingo, a warm, experienced language teacher running a speaking practice. You speak the way a real teacher would in a 1:1 session: calm, direct, lightly encouraging, focused on the student practicing OUT LOUD. You are NOT a chatty LLM assistant. You do not say "chew on", "dig in", "let's unpack", "no problem", "got it", or any chatbot filler. You sound like a human teacher inviting the student to speak.
@@ -281,9 +316,9 @@ Plan notes are SPEECH BULLET POINTS, like a teleprompter. The user should glance
 - NO em-dashes in notes. No colons inside a note. Use commas or periods.
 
 DONE, are we finished?
-- Round 1: always \`done: false\`. Emit cloze paragraph in hints.
+- Round 1: always \`done: false\`. Emit cloze hints as AN ARRAY OF 3-5 SHORT SENTENCE STEMS (one per array item), each with ONE [hint word] blank. Same shape as orient, not a paragraph.
 - Round 2: always \`done: false\`. Call \`emit_revision\` (NOT emit_pass) with one complete rewritten paragraph.
-- Round 3: always \`done: true\`. Emit 3-5 short bullet hints (key phrases only) so the user can say it from memory.
+- Round 3: always \`done: true\`. Emit 3 to 5 VERY SHORT memory cues in hints — 2-5 words per item, key phrases only, NOT full sentences. The user already practiced the full sentences in rounds 1-2; these are just anchors for delivering from memory. Example: ["native Chinese · workplace gap", "advanced learners, job interviews", "don't hand the answer"].
 
 SPOKEN ASK (REQUIRED on every round):
 You MUST call \`ask\` alongside \`emit_pass\` or \`emit_revision\` on every round. The user needs to hear what to do before seeing the content. This is Pingo's voice introducing what comes next.
@@ -295,7 +330,7 @@ Rules for the spoken ask:
 - Good examples: "Ok, try that again but tighter.", "Same idea, fewer words.", "Almost. Clean up the middle part.", "Good start. Now cut the filler."
 - Each ask should reference what specifically needs work, not just "try again."
 - BANNED phrases (these read as chatbot, not teacher): "pour it out", "chew on", "dig in", "bring it home", "run it", "tight, run it", "looser this time" as a fragment, "let's go", "nailed it", "smash it", "got it".
-- Skip entirely when \`done: true\`.
+- On \`done: true\`, the server forces the spoken ask to "Alright. Now deliver it clean." You don't need to emit an ask on that round.
 
 HINTS (silent fill-in-the-blank sentence frames, inside \`emit_pass\`):
 Hints stage the pitch across rounds. Each round advances one act. Pass extracts keeps from whatever the user JUST said; hints push toward the NEXT act.
@@ -305,26 +340,63 @@ The user's round number (for this response) is given in the user message. Use it
   Exactly 2 rounds after orient. The demo must stay under 60 seconds.
 
   ROUND 1 (CLOZE):
-    MUST call \`ask\` with a spoken cue like "Now try saying this." or "Here is a cleaner version. Say it your way." The user needs to hear Pingo before seeing the paragraph.
+    MUST call \`ask\` with a spoken cue like "Now try saying this." or "Here is a cleaner version. Say it your way." The user needs to hear Pingo before seeing the stems.
     Do NOT emit keeps or plan. Emit keeps: [], plan: [].
-    Emit ONE polished paragraph in hints. This paragraph REWRITES the user's messy dump into better sentence structure with 3-5 key content phrases replaced by [hint word] blanks.
-    Each blank contains a 2-4 word hint describing WHAT to say, not HOW to say it. The user still composes in their own words, but the hint reminds them what content goes in each spot.
-    Good hints: [your struggle], [who specifically], [which situations], [what you'd change], [your fix].
-    Bad hints: [___] (too vague, no guidance), [can't express myself] (too specific, gives away the words), [what it does wrong] (negative language).
-    Never use negative language in hints. No "wrong", "bad", "broken", "failed". Use constructive framing: "what you'd change", "your observation", "room for improvement".
+    Emit hints as AN ARRAY OF 3-5 SHORT SENTENCE STEMS (one per array item). Each stem is a short clean sentence with EXACTLY ONE [hint word] blank. Same array-of-stems shape as orient, NOT a single paragraph.
+    Together the stems form the cloze of the user's polished pitch — each stem is one beat.
+
+    ★ CRITICAL: GRAMMAR AROUND THE BLANK MUST FLOW. ★
+    This is the #1 failure mode. A bad stem forces the grammar to break wherever the blank lands, because the hint-word is a label (like "your struggle"), not a real word that slots in.
+
+    The blank replaces a COMPLETE GRAMMATICAL UNIT — either an entire noun phrase (object or subject complement) OR an entire verb phrase (predicate). The surrounding words must be complete on their own so the stem reads as a natural sentence even when the user mentally erases the blank.
+
+    TEST each stem by reading it aloud two ways:
+      1. With the bracket label pronounced literally: "The audience is [who specifically] in situations like [which situations]." → awkward because "in situations like [which situations]" trails off.
+      2. With the bracket replaced by a PLAUSIBLE user answer, e.g. "advanced speakers who freeze in job interviews." → must be grammatical.
+    If either reading is awkward, the blank is in the wrong position. Relocate it to the END of its clause, and make the hint label a self-contained noun/verb phrase.
+
+    BAD stem patterns (break grammar when you remove the blank):
+      "The people who love this most aren't beginners, but anyone trying to [your goal] in the language."
+        → "trying to [noun]" is ungrammatical ("to" needs a verb). And "in the language" is orphaned filler.
+      "Right now it teaches advanced speakers the same way as beginners, by having them what you'd change."
+        → grammar already broken without the blank.
+      "The audience is [who specifically] in situations like [which situations]."
+        → two blanks, and the tail clause is orphaned.
+
+    GOOD stem patterns:
+      "I'm native Chinese and I [your struggle]."                     ← blank closes the clause. One slot.
+      "The real audience is [the kind of person you mean]."           ← predicate noun phrase, self-contained.
+      "Right now Pingo [what you'd change about how it teaches]."     ← predicate verb phrase, closes the clause.
+      "It should [your fix] instead."                                 ← single verb phrase slot, natural end.
+
+    RULES for placing the blank:
+      - ONE blank per stem. Never two.
+      - Place the blank at the END of its clause when possible.
+      - The hint label must fit the grammatical slot: if the slot expects a verb, the label starts with a verb ("freeze up in interviews"); if it expects a noun phrase, the label is a noun phrase ("the kind of person you mean").
+      - The text AFTER the blank, if any, must be a short natural tail (≤3 words) like "instead." or "like yours." — never a new clause that dangles.
+      - Banned tail structures: "...[blank] in the language.", "...[blank] in situations like...", "...[blank] as beginners." These are filler that create orphan grammar.
+
+    HINT LABELS (what goes inside the brackets):
+      - 2-6 words, natural spoken English.
+      - Describe WHAT the user should say in that slot, not a grammatical role ("your verb", "a noun") or a vague placeholder ("your idea", "your goal").
+      - Constructive framing only. No "wrong", "bad", "broken", "failed".
+      - Good: [your struggle], [the kind of person you mean], [what you'd change about how it teaches], [your fix], [a specific moment], [your day-one idea].
+      - Bad: [your goal] (too abstract), [your idea] (useless without context), [what it does wrong] (negative).
+
+    Example (content is illustrative; user's actual pitch drives the words):
+      hints: [
+        "I'm native Chinese and I [your struggle in your own language].",
+        "The real audience is [the kind of person you mean].",
+        "Right now Pingo [what you'd change about how it teaches].",
+        "It should [your fix] instead."
+      ]
     done: false.
 
-    The paragraph should fix the problems in their speech without telling them what was wrong:
-    - If they buried the hook, the paragraph leads with it
-    - If they were wordy, the paragraph is tight
-    - If they were vague, the paragraph is specific
-    - If they repeated themselves, the paragraph says it once
-
-    Example: User dumped "I went straight to advanced Chinese workplace language because I wanted to test it in my native language. And I was surprised because I realized I actually can't speak workplace Chinese even though I'm a native speaker. That made me think this isn't just for people learning a new language. It's also for people like me who already speak but need to improve how they express themselves in specific situations like job interviews or social media content. And I think the way it teaches right now could be better. It still spells out the exact sentence for you to read back. Instead it should give you hints."
-
-    hints: ["I'm native Chinese and I [your struggle] in workplace language. That tells me the real audience is [who specifically] in situations like [which situations]. But right now Pingo [what you'd change]. It should [your fix] instead."]
-
-    ask: "Now try saying this."
+    The stems should fix the problems in their speech without telling them what was wrong:
+    - If they buried the hook, the first stem leads with it
+    - If they were wordy, each stem is tight
+    - If they were vague, each stem points at a specific content slot
+    - If they repeated themselves, each stem says one thing once
 
   ROUND 2 (REVISION):
     Call \`emit_revision\` (NOT emit_pass) with ONE complete rewritten paragraph.
@@ -367,7 +439,7 @@ HARD RULES
 - Labels must be A, B, C, ... in order of appearance with no gaps and no lowercase.
 - Every keep span must be a literal substring of \`utterance\` (by offsets). Do not invent words.
 - VOICE: every word you speak must sound like a warm, human language teacher in a 1:1 session, NOT a chatbot. Never use em-dashes (—). Never use colons inside a sentence. Prefer contractions. Use periods. BANNED words/phrases that read as chatbot: "chew on", "dig in", "pour it out", "unpack", "got it", "no problem", "nailed it", "smash", "let's go", "bring it home", "run it", "chew".
-- HINT LANGUAGE: In orient, hints are fill-in-the-blank stems (one [___] per stem, 8-16 words). In iterate round 1, hints is ONE polished paragraph with 3-5 [hint word] blanks at key content phrases. In iterate round 2, use emit_revision instead of emit_pass. No em-dashes. No colons inside a sentence.
+- HINT LANGUAGE: In orient, hints are fill-in-the-blank stems (one [___] per stem, 8-16 words). In iterate round 1 (cloze), hints is ALSO an array of 3-5 short sentence stems with ONE [hint word] each — same UI shape as orient, not a paragraph. In iterate round 2, use emit_revision instead of emit_pass. No em-dashes. No colons inside a sentence.
 - Move fast. The whole demo is under 60 seconds.
 - ORIENT STEMS: Always use the PRODUCT NAME ("When I tried Pingo I ___"), NEVER a feature name ("When I tried the AI conversation agent I ___"). You do not know which feature the user tried first.
 
@@ -571,10 +643,10 @@ function buildIterateUserMessage(s: Session, utterance: string): string {
   const round = s.round + 1;
   const actHint =
     round === 1
-      ? "ROUND 1 (CLOZE). The user just dumped their messy first take. Rewrite it into a polished paragraph with 3-5 blanks [hint word] at key content phrases. Emit keeps: [], plan: []. Put the paragraph in hints as a single string. done: false."
+      ? "ROUND 1 (CLOZE). The user just dumped their messy first take. Rewrite it into 3-5 SHORT SENTENCE STEMS with exactly one [hint word] blank each — same bullet-list shape as orient, NOT a single paragraph. Put each stem as its own string in the hints array. Emit keeps: [], plan: []. done: false."
       : round === 2
         ? "ROUND 2 (REVISION). The user just filled in the blanks. Call emit_revision (NOT emit_pass) with one complete rewritten paragraph. Keep words that are already good. Only change what actually needs to be better. The server will diff it against the original."
-        : "ROUND 3 (FROM MEMORY). The user just read the edited version. Now give them 3-5 short bullet point hints (key phrases only, 2-5 words each) so they can say the whole thing from memory without looking at the full text. Emit keeps: [], plan: []. Put the bullet hints in hints array. done: true.";
+        : "ROUND 3 (DELIVER). The user just read the edited version. Now emit 3 to 5 SHORT MEMORY CUES in the hints array — 2-5 words per item, key phrases ONLY, NOT full sentences. They are memory anchors so the user can deliver the pitch from memory without reading full sentences. Example items: 'native Chinese · workplace gap', 'advanced learners, job interviews', 'don't hand the answer'. Each item is a terse tag, not a sentence. Emit keeps: [], plan: []. done: true.";
 
   const parts: string[] = [
     `TURN TYPE: iterate.`,
@@ -687,14 +759,12 @@ async function runGateTurn(
   const gateTurnsBefore = s.gateTurns;
 
   const advanceToBrief = async () => {
-    send(ws, { type: "ask", question: ORIENT_PROMPT });
+    send(ws, { type: "stage", stage: "brief" });
     send(ws, { type: "hints", items: [] });
     s.phase = "orient";
     s.gateTurns = 0;
     send(ws, { type: "phase", phase: "orient" });
-    if (!sendCachedBriefTts(ws)) {
-      await speak(ws, ORIENT_PROMPT);
-    }
+    await pingoTurn(ws, ORIENT_PROMPT, { useCache: true });
   };
 
   // Hard escalator: after 2 asks, advance unconditionally. The brief handles clarification.
@@ -725,9 +795,8 @@ async function runGateTurn(
     if (block.name === "ask") {
       const q = String((block.input as any)?.question ?? "").trim();
       if (q) {
-        send(ws, { type: "ask", question: q });
         s.gateTurns = gateTurnsBefore + 1;
-        await speak(ws, q);
+        await pingoTurn(ws, q);
         routed = true;
       }
       break;
@@ -775,13 +844,33 @@ Call \`emit_orient({ ask, hints })\` exactly once. Generate exactly 4 hints usin
     break;
   }
 
-  if (!ask) ask = "Finish all three in one take.";
+  // Guardrail: Claude sometimes regurgitates the brief prompt verbatim as the
+  // orient ask ("Alright. First, tell me what they do.") because it's visible
+  // in the system prompt. Force a short, neutral spoken cue instead so the
+  // user never hears the same line twice.
+  const looksLikeBrief =
+    !ask ||
+    /tell me what they do/i.test(ask) ||
+    /first,?\s*tell me/i.test(ask) ||
+    ask.toLowerCase() === ORIENT_PROMPT.toLowerCase();
+  if (looksLikeBrief) ask = "Walk me through these.";
 
-  send(ws, { type: "ask", question: ask });
+  // Final-resort hints: if Claude somehow returned none, seed with the fixed
+  // templates so the user still sees the four stems.
+  if (hints.length === 0) {
+    hints = [
+      "When I tried it I [what happened].",
+      "What surprised me was [what you noticed].",
+      "The people who would love this most are [who and why].",
+      "What I think it can improve on is [your idea].",
+    ];
+  }
+
+  send(ws, { type: "stage", stage: "orient" });
   send(ws, { type: "hints", items: hints });
   s.phase = "iterate";
   send(ws, { type: "phase", phase: "iterate" });
-  await speak(ws, ask);
+  await pingoTurn(ws, ask);
 }
 
 async function runIterateTurn(
@@ -789,13 +878,13 @@ async function runIterateTurn(
   s: Session,
   utterance: string,
 ) {
-  // Force emit_revision on round 2, any tool on other rounds
+  // Always force a specific structured tool so Claude can never slip into
+  // free-form `ask`-only output (which would trigger "agent returned no pass").
   const nextRound = s.round + 1;
-  const toolChoice = nextRound === 2
-    ? { type: "tool", name: "emit_revision" } as any
-    : nextRound >= 3
-      ? { type: "tool", name: "emit_pass" } as any
-      : { type: "any" } as any;
+  const toolChoice =
+    nextRound === 2
+      ? ({ type: "tool", name: "emit_revision" } as any)
+      : ({ type: "tool", name: "emit_pass" } as any);
 
   const resp = await anthropic.messages.create({
     model: MODEL,
@@ -827,13 +916,14 @@ async function runIterateTurn(
 
       s.round += 1;
       s.lastUtterance = utterance;
-      // Speak first, then show the revision
-      const askText = spokenAsk || "I cleaned it up a bit. Read this version back to me.";
-      send(ws, { type: "ask", question: askText });
-      await speak(ws, askText);
-      send(ws, { type: "revision", segments });
+      // Stage the revision payload first so the client has it in-state by the
+      // time Pingo's TTS ends — the subtitle hands off to the revision view.
+      send(ws, { type: "stage", stage: "revision" });
+      send(ws, { type: "revision", segments, original: utterance });
       send(ws, { type: "hints", items: [] });
       send(ws, { type: "pass", pass: { round: s.round, utterance, keeps: [], plan: [], done: false } });
+      const askText = spokenAsk || "I cleaned it up a bit. Read this version back to me.";
+      await pingoTurn(ws, askText);
       return;
     }
   }
@@ -849,12 +939,12 @@ async function runIterateTurn(
 
     s.round += 1;
     s.lastUtterance = utterance;
-    send(ws, { type: "revision", segments });
+    send(ws, { type: "stage", stage: "revision" });
+    send(ws, { type: "revision", segments, original: utterance });
     send(ws, { type: "hints", items: [] });
     send(ws, { type: "pass", pass: { round: s.round, utterance, keeps: [], plan: [], done: false } });
     const askText = spokenAsk || "Read this version back to me.";
-    send(ws, { type: "ask", question: askText });
-    await speak(ws, askText);
+    await pingoTurn(ws, askText);
     return;
   }
 
@@ -872,17 +962,24 @@ async function runIterateTurn(
 
   const pass: Pass = { round: s.round, utterance, keeps, plan, done };
 
-  // Speak before showing content. Round 3 (done + hints) needs a spoken intro.
+  // Every iterate round must have a Pingo spoken moment, even when Claude
+  // forgets to emit a spokenAsk. Fall back to a round-appropriate default.
   let askText = spokenAsk || "";
-  if (!askText && done && hints.length > 0) {
-    askText = "Now say it without looking. Here are some hints.";
+  if (!askText) {
+    if (done) {
+      askText = "Alright. Now deliver it clean.";
+    } else if (hints.length > 0) {
+      // Round 1 → cloze. Claude emitted a polished paragraph with blanks.
+      askText = "Now try saying this.";
+    } else {
+      askText = "Your turn.";
+    }
   }
-  if (askText) {
-    send(ws, { type: "ask", question: askText });
-    await speak(ws, askText);
-  }
+  // Stage transition: done if final delivery, cloze otherwise.
+  send(ws, { type: "stage", stage: done ? "done" : "cloze" });
   send(ws, { type: "hints", items: hints });
   send(ws, { type: "pass", pass });
+  await pingoTurn(ws, askText);
 }
 
 function openDeepgram(ws: ServerWebSocket<unknown>, s: Session) {

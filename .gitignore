@@ -7,3 +7,4 @@ bun.lockb
 demos/test-ui.ts
 demos/test-demo.ts
 demos/test-screenshot.png
+tests/screenshots/
