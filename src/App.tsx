@@ -328,12 +328,12 @@ export default function App() {
             className="h-full"
           >
             <div className="w-full max-w-7xl mx-auto space-y-10 md:space-y-14">
-              {showHints && !pass?.done && !revision && <Hints items={hints} />}
-              {revision ? (
+              {showHints && !revision && <Hints items={hints} />}
+              {revision && !showHints ? (
                 <RevisionView segments={revision} />
-              ) : pass?.done ? (
+              ) : pass?.done && !showHints ? (
                 <DonePanel />
-              ) : pass ? (
+              ) : !showHints && pass ? (
                 <PassPanel pass={pass} />
               ) : null}
             </div>

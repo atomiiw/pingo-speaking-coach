@@ -239,6 +239,7 @@ Spoken ask should be short, warm, and tell the user what to do THIS round specif
 Orient: you are setting up the user to walk through the four stems. Adapt based on context. If they mentioned using the product: "If you've tried it, tell me how it felt." If they haven't tried it or it's a B2B product: "Tell me what drew you to them." Keep it short and specific to what they just said.
 Cloze: you are asking them to say the paragraph filling in the blanks. E.g. "Now try saying this.", "Try saying this."
 Revision: you are asking them to read the cleaned-up version. E.g. "Read this version back to me.", "Say this one clean."
+From memory: you are asking them to say the whole thing without the full text. E.g. "Now say it without looking. Here are some hints.", "Try it from memory. These should help."
 NEVER: "Fill these in out loud.", "Complete these.", "Ok, your turn.", "Give it a shot.", "Chew on these.", "Dig in.", "Got it.", "Let's unpack.", "Here you go." Nothing generic. Every ask should be specific to what the user is about to do.
 
 After \`emit_orient\`, the server advances to iterate and shows your stems on screen. The user then speaks, and iterate takes over.
@@ -281,10 +282,11 @@ Plan notes are SPEECH BULLET POINTS, like a teleprompter. The user should glance
 
 DONE, are we finished?
 - Round 1: always \`done: false\`. Emit cloze paragraph in hints.
-- Round 2: always \`done: true\`. Call \`emit_revision\` (NOT emit_pass) with one complete rewritten paragraph.
+- Round 2: always \`done: false\`. Call \`emit_revision\` (NOT emit_pass) with one complete rewritten paragraph.
+- Round 3: always \`done: true\`. Emit 3-5 short bullet hints (key phrases only) so the user can say it from memory.
 
-SPOKEN ASK (REQUIRED on round 1 and round 2, optional otherwise):
-You MUST call \`ask\` alongside \`emit_pass\` or \`emit_revision\` on rounds 1 and 2. The user needs to hear what to do before seeing the content. This is Pingo's voice introducing what comes next.
+SPOKEN ASK (REQUIRED on every round):
+You MUST call \`ask\` alongside \`emit_pass\` or \`emit_revision\` on every round. The user needs to hear what to do before seeing the content. This is Pingo's voice introducing what comes next.
 
 Rules for the spoken ask:
 - Under 12 words. Sound like a warm language teacher in a practice session, not a chatbot.
@@ -569,8 +571,10 @@ function buildIterateUserMessage(s: Session, utterance: string): string {
   const round = s.round + 1;
   const actHint =
     round === 1
-      ? "ROUND 1 (CLOZE). The user just dumped their messy first take. Rewrite it into a polished paragraph with 3-5 blanks [___] at key content phrases. Emit keeps: [], plan: []. Put the paragraph in hints as a single string. done: false."
-      : "ROUND 2 (REVISION). The user just filled in the blanks. Call emit_revision (NOT emit_pass) with one complete rewritten paragraph. Keep words that are already good. Only change what actually needs to be better. The server will diff it against the original.";
+      ? "ROUND 1 (CLOZE). The user just dumped their messy first take. Rewrite it into a polished paragraph with 3-5 blanks [hint word] at key content phrases. Emit keeps: [], plan: []. Put the paragraph in hints as a single string. done: false."
+      : round === 2
+        ? "ROUND 2 (REVISION). The user just filled in the blanks. Call emit_revision (NOT emit_pass) with one complete rewritten paragraph. Keep words that are already good. Only change what actually needs to be better. The server will diff it against the original."
+        : "ROUND 3 (FROM MEMORY). The user just read the edited version. Now give them 3-5 short bullet point hints (key phrases only, 2-5 words each) so they can say the whole thing from memory without looking at the full text. Emit keeps: [], plan: []. Put the bullet hints in hints array. done: true.";
 
   const parts: string[] = [
     `TURN TYPE: iterate.`,
@@ -785,9 +789,9 @@ async function runIterateTurn(
   s: Session,
   utterance: string,
 ) {
-  // Force emit_revision on round 2 so the LLM can't accidentally use emit_pass
+  // Force emit_revision on round 2, any tool on other rounds
   const nextRound = s.round + 1;
-  const toolChoice = nextRound >= 2
+  const toolChoice = nextRound === 2
     ? { type: "tool", name: "emit_revision" } as any
     : { type: "any" } as any;
 
@@ -827,7 +831,7 @@ async function runIterateTurn(
       await speak(ws, askText);
       send(ws, { type: "revision", segments });
       send(ws, { type: "hints", items: [] });
-      send(ws, { type: "pass", pass: { round: s.round, utterance, keeps: [], plan: [], done: true } });
+      send(ws, { type: "pass", pass: { round: s.round, utterance, keeps: [], plan: [], done: false } });
       return;
     }
   }
@@ -835,8 +839,8 @@ async function runIterateTurn(
   // Round 2 MUST use emit_revision. If the LLM returned emit_pass instead,
   // force a revision by using the utterance as both original and revised (no diff).
   const round = s.round + 1;
-  if (round >= 2 && !rawRevision && rawInput) {
-    // LLM used wrong tool. Take the hints as the revised text if available.
+  if (round === 2 && !rawRevision && rawInput) {
+    // LLM used wrong tool on round 2. Take the hints as the revised text if available.
     const hintsText = Array.isArray(rawInput?.hints) ? rawInput.hints.join(" ") : "";
     const revised = hintsText || utterance;
     const segments = diffWords(utterance, revised);
@@ -845,7 +849,7 @@ async function runIterateTurn(
     s.lastUtterance = utterance;
     send(ws, { type: "revision", segments });
     send(ws, { type: "hints", items: [] });
-    send(ws, { type: "pass", pass: { round: s.round, utterance, keeps: [], plan: [], done: true } });
+    send(ws, { type: "pass", pass: { round: s.round, utterance, keeps: [], plan: [], done: false } });
     const askText = spokenAsk || "Read this version back to me.";
     send(ws, { type: "ask", question: askText });
     await speak(ws, askText);
