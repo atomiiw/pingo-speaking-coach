@@ -793,7 +793,9 @@ async function runIterateTurn(
   const nextRound = s.round + 1;
   const toolChoice = nextRound === 2
     ? { type: "tool", name: "emit_revision" } as any
-    : { type: "any" } as any;
+    : nextRound >= 3
+      ? { type: "tool", name: "emit_pass" } as any
+      : { type: "any" } as any;
 
   const resp = await anthropic.messages.create({
     model: MODEL,
@@ -870,15 +872,17 @@ async function runIterateTurn(
 
   const pass: Pass = { round: s.round, utterance, keeps, plan, done };
 
-  // Always emit ask (text or empty) and hints (possibly empty) to keep client state in sync.
-  // Suppress spoken ask on done; done screen speaks for itself.
-  const askText = spokenAsk && !done ? spokenAsk : "";
-  send(ws, { type: "ask", question: askText });
-  send(ws, { type: "hints", items: hints });
-  send(ws, { type: "pass", pass });
+  // Speak before showing content. Round 3 (done + hints) needs a spoken intro.
+  let askText = spokenAsk || "";
+  if (!askText && done && hints.length > 0) {
+    askText = "Now say it without looking. Here are some hints.";
+  }
   if (askText) {
+    send(ws, { type: "ask", question: askText });
     await speak(ws, askText);
   }
+  send(ws, { type: "hints", items: hints });
+  send(ws, { type: "pass", pass });
 }
 
 function openDeepgram(ws: ServerWebSocket<unknown>, s: Session) {

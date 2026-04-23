@@ -51,12 +51,10 @@ export default function App() {
   useEffect(() => {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     const wsUrl = `${proto}//${location.host}/ws`;
-    console.log("[ws] connecting", wsUrl);
     const ws = new WebSocket(wsUrl);
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
 
-    ws.onopen = () => console.log("[ws] open");
     ws.onmessage = (ev) => {
       if (typeof ev.data !== "string") return;
       let msg: ServerMsg;
@@ -65,14 +63,9 @@ export default function App() {
       } catch {
         return;
       }
-      // Suppress per-chunk logs — tts streams can produce 30–60 chunks per reply.
-      if (msg.type !== "tts_chunk") {
-        console.log("[ws<-]", msg.type, msg);
-      }
       switch (msg.type) {
         case "ready":
           setReady(true);
-          console.log("[ws->] hello");
           ws.send(JSON.stringify({ type: "hello" }));
           break;
         case "phase":
@@ -136,8 +129,7 @@ export default function App() {
     ws.onerror = (e) => {
       console.error("[ws] error", e);
     };
-    ws.onclose = (e) => {
-      console.log("[ws] close", e.code, e.reason);
+    ws.onclose = () => {
       setReady(false);
     };
 
@@ -165,7 +157,6 @@ export default function App() {
 
   const startTalk = useCallback(async () => {
     if (!ready || recordingRef.current) return;
-    console.log("[talk] start");
     setInterim("");
     setAsk(null);
     setAwaiting(false);
@@ -195,7 +186,6 @@ export default function App() {
           console.warn(`[audio] sample rate ${ctx.sampleRate}, expected 16000 — STT may degrade`);
         }
         await ctx.audioWorklet.addModule("/pcm-worklet.js");
-        console.log("[audio] ctx sampleRate =", ctx.sampleRate);
         persistentCtxRef.current = ctx;
         const mute = ctx.createGain();
         mute.gain.value = 0;
@@ -208,16 +198,11 @@ export default function App() {
 
       const src = ctx.createMediaStreamSource(stream);
       const node = new AudioWorkletNode(ctx, "pcm-encoder");
-      let chunksSent = 0;
       node.port.onmessage = (e) => {
         if (!recordingRef.current) return;
         const ws = wsRef.current;
         if (ws && ws.readyState === WebSocket.OPEN) {
           ws.send(e.data);
-          chunksSent++;
-          if (chunksSent % 20 === 1) {
-            console.log("[audio->ws] chunks sent:", chunksSent, "last size:", (e.data as ArrayBuffer).byteLength);
-          }
         }
       };
       src.connect(node);
@@ -229,7 +214,6 @@ export default function App() {
     }
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    console.log("[ws->] start_turn");
     ws.send(JSON.stringify({ type: "start_turn" }));
     recordingRef.current = true;
     setRecording(true);
@@ -237,14 +221,12 @@ export default function App() {
 
   const stopTalk = useCallback(() => {
     if (!recordingRef.current) return;
-    console.log("[talk] stop");
     recordingRef.current = false;
     setRecording(false);
     setAwaiting(true);
     teardownAudio();
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
-      console.log("[ws->] end_turn");
       ws.send(JSON.stringify({ type: "end_turn" }));
     }
   }, []);
@@ -287,7 +269,7 @@ export default function App() {
   return (
     <div className={`h-screen grid ${gridRows} relative`}>
       {/* TOP — ephemeral content: transcript | subtitle | first-turn hint */}
-      <section className={`min-h-0 overflow-hidden px-8 md:px-12 ${topGrows ? "pt-4 md:pt-5 pb-2 md:pb-3" : "pt-8 md:pt-12 pb-3 md:pb-4 max-h-[22vh]"}`}>
+      <section className={`min-h-0 overflow-hidden px-8 md:px-12 ${topGrows ? "pt-4 md:pt-5 pb-2 md:pb-3" : "pt-3 md:pt-4 pb-1 md:pb-1"}`}>
         {showHoldHint ? (
           <HoldHint />
         ) : (
@@ -429,15 +411,16 @@ function SpeakerLabel({
   className?: string;
 }) {
   const color = speaker === "pingo" ? "text-pingo-600" : "text-cream-500";
+  const label = speaker === "pingo" ? "Pingo" : "Atom";
   return (
     <div
       className={[
-        "font-mono text-[14px] md:text-[16px] tracking-[0.24em] lowercase mb-3 md:mb-4 select-none font-semibold",
+        "font-mono text-[14px] md:text-[16px] tracking-[0.24em] mb-3 md:mb-4 select-none font-semibold",
         color,
         className,
       ].join(" ")}
     >
-      {speaker}
+      {label}
     </div>
   );
 }
