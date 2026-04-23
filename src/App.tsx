@@ -287,7 +287,7 @@ export default function App() {
   return (
     <div className={`h-screen grid ${gridRows} relative`}>
       {/* TOP — ephemeral content: transcript | subtitle | first-turn hint */}
-      <section className={`min-h-0 overflow-hidden px-8 md:px-12 pt-4 md:pt-5 ${topGrows ? "pb-2 md:pb-3" : "pb-6 md:pb-8 max-h-[20vh]"}`}>
+      <section className={`min-h-0 overflow-hidden px-8 md:px-12 ${topGrows ? "pt-4 md:pt-5 pb-2 md:pb-3" : "pt-8 md:pt-12 pb-3 md:pb-4 max-h-[22vh]"}`}>
         {showHoldHint ? (
           <HoldHint />
         ) : (
