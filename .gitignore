@@ -4,6 +4,6 @@ dist
 .env.local
 bun.lockb
 .DS_Store
-test-ui.ts
-test-demo.ts
-test-screenshot.png
+demos/test-ui.ts
+demos/test-demo.ts
+demos/test-screenshot.png

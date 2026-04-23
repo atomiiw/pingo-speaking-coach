@@ -14,19 +14,19 @@ Three rounds. Each round you speak, and the agent reshapes how you said it.
 
 The agent gives you four fill-in-the-blank stems. You say everything messy in one take.
 
-![Orient](demo-step0-orient.png)
+![Orient](demos/demo-step0-orient.png)
 
 ### Round 1: Say it with structure
 
 The agent rewrites your dump into a polished paragraph with blanks where your key content goes. You fill them in out loud. The structure teaches you better phrasing without giving you the words.
 
-![Cloze](demo-step1-cloze.png)
+![Cloze](demos/demo-step1-cloze.png)
 
 ### Round 2: Read the polished version
 
 The agent rewrites your speech one more time. A word-level diff highlights exactly what changed: grey strikethrough for removed words, green for replacements. You read the final version clean.
 
-![Revision](demo-step2-revision.png)
+![Revision](demos/demo-step2-revision.png)
 
 ## The Insight
 
@@ -60,4 +60,4 @@ bun install
 bun run dev
 ```
 
-Hold spacebar to talk. Release to send.
+Tap the button (or press spacebar) to start speaking. Tap again to send.
