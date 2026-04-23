@@ -785,12 +785,18 @@ async function runIterateTurn(
   s: Session,
   utterance: string,
 ) {
+  // Force emit_revision on round 2 so the LLM can't accidentally use emit_pass
+  const nextRound = s.round + 1;
+  const toolChoice = nextRound >= 2
+    ? { type: "tool", name: "emit_revision" } as any
+    : { type: "any" } as any;
+
   const resp = await anthropic.messages.create({
     model: MODEL,
     max_tokens: 1024,
     system: SYSTEM_PROMPT,
     tools: tools as any,
-    tool_choice: { type: "any" } as any,
+    tool_choice: toolChoice,
     messages: [{ role: "user", content: buildIterateUserMessage(s, utterance) }],
   });
 
@@ -815,14 +821,35 @@ async function runIterateTurn(
 
       s.round += 1;
       s.lastUtterance = utterance;
+      // Speak first, then show the revision
+      const askText = spokenAsk || "I cleaned it up a bit. Read this version back to me.";
+      send(ws, { type: "ask", question: askText });
+      await speak(ws, askText);
       send(ws, { type: "revision", segments });
       send(ws, { type: "hints", items: [] });
       send(ws, { type: "pass", pass: { round: s.round, utterance, keeps: [], plan: [], done: true } });
-      const askText = spokenAsk || "Read the edited version one clean time.";
-      send(ws, { type: "ask", question: askText });
-      await speak(ws, askText);
       return;
     }
+  }
+
+  // Round 2 MUST use emit_revision. If the LLM returned emit_pass instead,
+  // force a revision by using the utterance as both original and revised (no diff).
+  const round = s.round + 1;
+  if (round >= 2 && !rawRevision && rawInput) {
+    // LLM used wrong tool. Take the hints as the revised text if available.
+    const hintsText = Array.isArray(rawInput?.hints) ? rawInput.hints.join(" ") : "";
+    const revised = hintsText || utterance;
+    const segments = diffWords(utterance, revised);
+
+    s.round += 1;
+    s.lastUtterance = utterance;
+    send(ws, { type: "revision", segments });
+    send(ws, { type: "hints", items: [] });
+    send(ws, { type: "pass", pass: { round: s.round, utterance, keeps: [], plan: [], done: true } });
+    const askText = spokenAsk || "Read this version back to me.";
+    send(ws, { type: "ask", question: askText });
+    await speak(ws, askText);
+    return;
   }
 
   if (!rawInput) {
