@@ -1,6 +1,6 @@
 # Pingo Speaking Coach
 
-A push-to-talk agent that helps advanced speakers organize their thoughts and say them better, in under 60 seconds.
+A push-to-talk agent that helps advanced speakers organize their thoughts and say them better.
 
 ## Why
 
