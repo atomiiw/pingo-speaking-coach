@@ -1,0 +1,9 @@
+node_modules
+dist
+.env
+.env.local
+bun.lockb
+.DS_Store
+test-ui.ts
+test-demo.ts
+test-screenshot.png
